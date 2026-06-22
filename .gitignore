@@ -1,0 +1,56 @@
+# Java / Maven
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+!backend/.mvn/wrapper/maven-wrapper.properties
+*.class
+*.jar
+*.war
+*.ear
+*.log
+*.iml
+.idea/
+*.iws
+*.ipr
+
+# Spring Boot
+backend/src/main/resources/application-local.yml
+
+# Node / Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env.local
+frontend/.env.*.local
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+!frontend/.env.example
+
+# Docker volumes (local)
+postgres_data/
+redis_data/
+kafka_data/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# Test reports
+backend/target/surefire-reports/
+backend/target/site/
+
+# IDE
+.vscode/
+*.code-workspace
+
+# Railway
+.railway/

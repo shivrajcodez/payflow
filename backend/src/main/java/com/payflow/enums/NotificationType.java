@@ -1,0 +1,6 @@
+package com.payflow.enums;
+
+public enum NotificationType {
+    PAYMENT_SUCCESS, PAYMENT_FAILED, REFUND_INITIATED, REFUND_COMPLETED,
+    FRAUD_ALERT, ACCOUNT_ACTIVITY, SYSTEM
+}
