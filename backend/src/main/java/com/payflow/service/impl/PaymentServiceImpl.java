@@ -7,7 +7,12 @@ import com.payflow.dto.response.PagedResponse;
 import com.payflow.dto.response.PaymentResponse;
 import com.payflow.dto.response.RefundResponse;
 import com.payflow.entity.*;
-import com.payflow.enums.*;
+import com.payflow.enums.FraudRiskLevel;
+import com.payflow.enums.PaymentStatus;
+import com.payflow.enums.RefundStatus;
+import com.payflow.enums.TransactionType;
+import com.payflow.enums.UserRole;
+import com.payflow.enums.PaymentMethod;
 import com.payflow.event.PaymentEvent;
 import com.payflow.exception.PayFlowException;
 import com.payflow.repository.*;
@@ -59,7 +64,6 @@ public class PaymentServiceImpl implements PaymentService {
     @Retry(name = "paymentService")
     @CacheEvict(value = {"payments", "analytics"}, allEntries = true)
     public PaymentResponse createPayment(CreatePaymentRequest request, User user, String ipAddress) {
-        // Idempotency check
         if (request.getIdempotencyKey() != null) {
             Optional<Payment> existing = paymentRepository.findByIdempotencyKey(request.getIdempotencyKey());
             if (existing.isPresent()) {
@@ -68,7 +72,6 @@ public class PaymentServiceImpl implements PaymentService {
             }
         }
 
-        // Fraud check
         int riskScore = fraudDetectionService.calculateRiskScore(request, user, ipAddress);
         FraudRiskLevel riskLevel = fraudDetectionService.getRiskLevel(riskScore);
 
@@ -76,7 +79,6 @@ public class PaymentServiceImpl implements PaymentService {
             throw PayFlowException.forbidden("Transaction blocked due to high fraud risk");
         }
 
-        // Calculate fees
         BigDecimal processingFee = request.getAmount()
             .multiply(PROCESSING_FEE_RATE)
             .add(PROCESSING_FEE_FIXED)
@@ -111,18 +113,14 @@ public class PaymentServiceImpl implements PaymentService {
 
         payment = paymentRepository.save(payment);
 
-        // Save fraud flag if medium or higher risk
         if (riskLevel != FraudRiskLevel.LOW) {
             fraudDetectionService.saveFraudFlag(payment, user, riskScore, riskLevel, ipAddress);
         }
 
-        // Process payment asynchronously (simulate gateway call)
         processPaymentAsync(payment);
-
-        // Publish event to Kafka
         publishPaymentEvent(payment, PaymentEvent.PAYMENT_CREATED);
 
-        log.info("Payment created: {} for user: {} amount: {} {}", 
+        log.info("Payment created: {} for user: {} amount: {} {}",
             payment.getPaymentReference(), user.getEmail(), request.getAmount(), request.getCurrency());
 
         return mapToPaymentResponse(payment);
@@ -132,14 +130,11 @@ public class PaymentServiceImpl implements PaymentService {
     @Transactional
     public void processPaymentAsync(Payment payment) {
         try {
-            Thread.sleep(500 + new Random().nextInt(1000)); // Simulate gateway latency
-
+            Thread.sleep(500 + new Random().nextInt(1000));
             payment.setStatus(PaymentStatus.PROCESSING);
             paymentRepository.save(payment);
-
             Thread.sleep(200 + new Random().nextInt(500));
 
-            // Simulate 92% success rate
             boolean success = new Random().nextDouble() > 0.08;
 
             if (success) {
@@ -148,7 +143,6 @@ public class PaymentServiceImpl implements PaymentService {
                 payment.setProcessedAt(Instant.now());
                 payment.setReceiptUrl("https://payflow.dev/receipts/" + payment.getPaymentReference());
                 paymentRepository.save(payment);
-
                 createTransaction(payment, null, TransactionType.PAYMENT);
                 notificationService.notifyPaymentSuccess(payment);
                 publishPaymentEvent(payment, PaymentEvent.PAYMENT_COMPLETED);
@@ -158,7 +152,6 @@ public class PaymentServiceImpl implements PaymentService {
                 payment.setFailureCode("card_declined");
                 payment.setFailureMessage("Your card was declined. Please try a different payment method.");
                 paymentRepository.save(payment);
-
                 notificationService.notifyPaymentFailed(payment);
                 publishPaymentEvent(payment, PaymentEvent.PAYMENT_FAILED);
                 log.warn("Payment failed: {}", payment.getPaymentReference());
@@ -215,7 +208,6 @@ public class PaymentServiceImpl implements PaymentService {
 
         refund = refundRepository.save(refund);
 
-        // Update payment status
         if (refundAmount.compareTo(payment.getAmount()) >= 0) {
             payment.setStatus(PaymentStatus.REFUNDED);
         } else {
@@ -223,7 +215,6 @@ public class PaymentServiceImpl implements PaymentService {
         }
         paymentRepository.save(payment);
 
-        // Process refund asynchronously
         processRefundAsync(refund, payment);
 
         log.info("Refund initiated: {} for payment: {}", refund.getRefundReference(), payment.getPaymentReference());
@@ -235,12 +226,10 @@ public class PaymentServiceImpl implements PaymentService {
     public void processRefundAsync(Refund refund, Payment payment) {
         try {
             Thread.sleep(300 + new Random().nextInt(700));
-
             refund.setStatus(RefundStatus.COMPLETED);
             refund.setGatewayRefundId("rfd_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16));
             refund.setProcessedAt(Instant.now());
             refundRepository.save(refund);
-
             createTransaction(payment, refund, TransactionType.REFUND);
             notificationService.notifyRefundCompleted(refund);
             publishPaymentEvent(payment, PaymentEvent.REFUND_COMPLETED);
@@ -268,7 +257,8 @@ public class PaymentServiceImpl implements PaymentService {
 
     @Override
     @Transactional(readOnly = true)
-    public PagedResponse<PaymentResponse> getPayments(User user, PaymentStatus status, Currency currency,
+    public PagedResponse<PaymentResponse> getPayments(User user, PaymentStatus status,
+                                                       com.payflow.enums.Currency currency,
                                                        Instant from, Instant to, BigDecimal minAmount,
                                                        BigDecimal maxAmount, String query, Pageable pageable) {
         Page<Payment> payments = paymentRepository.findWithFilters(
@@ -321,7 +311,6 @@ public class PaymentServiceImpl implements PaymentService {
         long successfulPayments = paymentRepository.countByStatusAndCreatedAtAfter(PaymentStatus.COMPLETED, Instant.EPOCH);
         long failedPayments = paymentRepository.countByStatusAndCreatedAtAfter(PaymentStatus.FAILED, Instant.EPOCH);
         long pendingPayments = paymentRepository.countByStatusAndCreatedAtAfter(PaymentStatus.PENDING, monthStart);
-
         double successRate = totalPayments > 0 ? (double) successfulPayments / totalPayments * 100 : 0.0;
 
         long totalUsers = userRepository.count();
